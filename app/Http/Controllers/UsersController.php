@@ -382,7 +382,7 @@ class UsersController extends Controller
                 WHERE id = :userId
             ";
             DB::update($updateQuery, [
-                'password' => Hash::make($password),
+                'password' => base64_encode($password),
                 'userId' => $userId
             ]);
 
