@@ -15,7 +15,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(\App\Http\Middleware\CorsMiddleware::class);
     
         $middleware->validateCsrfTokens(except: [
-            'users/addUser'
+            'users/login',
+            'users/addUser',
+            'users/sendOtp',
+            'users/verifyOtp',
+            'users/resetPassword',
+            'users/updateTeacher',
+            'users/deleteTeacher'
         ]);
     
     })
