@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 
 class UsersController extends Controller
 {
@@ -36,8 +37,7 @@ class UsersController extends Controller
         {
             $validatedData = $request->validate([
                 'name' => 'required|string|max:255',
-                'email' => 'required|email|max:255',
-                'userTypeId' => 'required|integer'
+                'email' => 'required|email|max:255'
             ]);
 
             $userName = isset($request->userName) ? trim($request->userName) : '';
@@ -52,18 +52,36 @@ class UsersController extends Controller
             $password = $credentialsResult['password'];
             $isGeneratedCredentials = $credentialsResult['isGeneratedCredentials'];
 
+            $getLastUserIdQuery = "
+                SELECT
+                    id
+                FROM
+                    users
+                WHERE
+                    status = 'active'
+                    AND user_type_id = 2
+                ORDER BY
+                    id DESC
+                LIMIT 1
+            ";
+            $lastUserRows = DB::select($getLastUserIdQuery);
+            $newUserId = empty($lastUserRows) ? 1 : ($lastUserRows[0]->id + 1);
+
             $userId = DB::table('users')->insertGetId([
+                'institute_id' => $newUserId,
                 'name' => $validatedData['name'],
                 'email' => $validatedData['email'],
                 'user_name' => $userName,
                 'password' => base64_encode($password),
-                'user_type_id' => $validatedData['userTypeId'],
+                'user_type_id' => 2,
+                'status' => 'active',
                 'created_at' => now(),
                 'updated_at' => now()
             ]);
 
             $responseData = [
                 'user_id' => $userId,
+                'institute_id' => $newUserId,
                 'username' => $userName,
                 'password' => $password,
                 'is_generated_credentials' => $isGeneratedCredentials
@@ -85,71 +103,187 @@ class UsersController extends Controller
         }
     }
 
-    private function resolveUserCredentials($userName, $password)
+    /**
+     * Create an academic year for an institute and link it (institutes.academic_year_id or users.academic_year_id).
+     * Table academic_years uses column name insitute_id (as in the live schema).
+     */
+    public function addAcademicYear(Request $request)
     {
-        $isGeneratedCredentials = false;
-
-        if ($userName === '' || $password === '')
+        try
         {
-            $isGeneratedCredentials = true;
-            $maxAttempt = 20;
-            $attempt = 0;
-            do
-            {
-                $attempt++;
-                $credentials = $this->generateCredentials(10);
-                $userName = $credentials['username'];
-                $password = $credentials['password'];
-            }
-            while ($this->isUsernameExists($userName) && $attempt < $maxAttempt);
+            $validated = $request->validate([
+                'institute_id' => 'required|integer|min:1',
+                'name' => 'required|string|max:255',
+                'session_start' => 'required|date',
+                'session_end' => 'required|date|after_or_equal:session_start',
+                'status' => 'sometimes|string|in:active,inactive,deleted,legacy',
+                'school_user_id' => 'nullable|integer|min:1',
+            ]);
 
-            if ($this->isUsernameExists($userName))
+            $status = isset($validated['status']) ? $validated['status'] : 'active';
+            $instituteId = (int) $validated['institute_id'];
+            $schoolUserId = isset($validated['school_user_id']) ? (int) $validated['school_user_id'] : null;
+            $linkToInstitute = $request->boolean('link_to_institute', true);
+
+            $academicYearId = DB::table('academic_years')->insertGetId([
+                'insitute_id' => $instituteId,
+                'name' => $validated['name'],
+                'session_start' => $validated['session_start'],
+                'session_end' => $validated['session_end'],
+                'status' => $status,
+            ]);
+
+            if ($linkToInstitute)
             {
-                return [
-                    'isOk' => false,
-                    'status' => 500,
-                    'message' => 'Unable to generate unique credentials',
-                    'username' => '',
-                    'password' => '',
-                    'isGeneratedCredentials' => true
-                ];
+                $this->linkAcademicYearToSchool($academicYearId, $instituteId, $schoolUserId);
             }
+
+            return $this->sendResponse('Academic year created successfully', 200, [
+                'academic_year_id' => $academicYearId,
+                'institute_id' => $instituteId,
+            ]);
         }
-        else if ($this->isUsernameExists($userName))
+        catch (\Illuminate\Validation\ValidationException $validationException)
         {
-            return [
-                'isOk' => false,
-                'status' => 409,
-                'message' => 'Username already exists',
-                'username' => '',
-                'password' => '',
-                'isGeneratedCredentials' => false
-            ];
+            return $this->sendResponse('Validation failed', 422, $validationException->errors());
         }
+        catch (\Throwable $exception)
+        {
+            Log::error('addAcademicYear failed', [
+                'message' => $exception->getMessage(),
+                'trace' => $exception->getTraceAsString(),
+            ]);
 
-        return [
-            'isOk' => true,
-            'status' => 200,
-            'message' => '',
-            'username' => $userName,
-            'password' => $password,
-            'isGeneratedCredentials' => $isGeneratedCredentials
-        ];
+            return $this->sendResponse($exception->getMessage(), 500, []);
+        }
     }
 
-    private function isUsernameExists($userName)
+    /**
+     * Soft-delete an academic year (status = deleted).
+     */
+    public function deleteAcademicYear(Request $request)
     {
-        $checkQuery = "
-            SELECT
-                id
-            FROM
-                users
-            WHERE
-                user_name = :userName
-            LIMIT 1
-        ";
-        $existingUser = DB::select($checkQuery, ['userName' => $userName]);
-        return !empty($existingUser);
+        try
+        {
+            $validated = $request->validate([
+                'id' => 'required|integer|min:1',
+                'institute_id' => 'required|integer|min:1',
+            ]);
+
+            $id = (int) $validated['id'];
+            $instituteId = (int) $validated['institute_id'];
+
+            $updated = DB::table('academic_years')
+                ->where('id', $id)
+                ->where('insitute_id', $instituteId)
+                ->update(['status' => 'deleted']);
+
+            if ($updated === 0)
+            {
+                return $this->sendResponse('Academic year not found or access denied', 404, []);
+            }
+
+            return $this->sendResponse('Academic year deleted successfully', 200, [
+                'id' => $id,
+            ]);
+        }
+        catch (\Illuminate\Validation\ValidationException $validationException)
+        {
+            return $this->sendResponse('Validation failed', 422, $validationException->errors());
+        }
+        catch (\Throwable $exception)
+        {
+            Log::error('deleteAcademicYear failed', [
+                'message' => $exception->getMessage(),
+                'trace' => $exception->getTraceAsString(),
+            ]);
+
+            return $this->sendResponse($exception->getMessage(), 500, []);
+        }
+    }
+
+    /**
+     * List academic years for an institution (excludes soft-deleted rows).
+     */
+    public function listAcademicYears(Request $request)
+    {
+        try
+        {
+            $validated = $request->validate([
+                'institute_id' => 'required|integer|min:1',
+            ]);
+
+            $instituteId = (int) $validated['institute_id'];
+
+            $rows = DB::table('academic_years')
+                ->where('insitute_id', $instituteId)
+                ->where('status', '!=', 'deleted')
+                ->orderByDesc('id')
+                ->get()
+                ->map(function ($row)
+                {
+                    return (array) $row;
+                })
+                ->values()
+                ->all();
+
+            $linkedAcademicYearId = null;
+            if (Schema::hasTable('institutes'))
+            {
+                $linkedAcademicYearId = DB::table('institutes')
+                    ->where('id', $instituteId)
+                    ->value('academic_year_id');
+            }
+            elseif (Schema::hasColumn('users', 'academic_year_id'))
+            {
+                $linkedAcademicYearId = DB::table('users')
+                    ->where('institute_id', $instituteId)
+                    ->where('user_type_id', 2)
+                    ->where('status', 'active')
+                    ->orderBy('id')
+                    ->value('academic_year_id');
+            }
+
+            return $this->sendResponse('Academic years fetched successfully', 200, [
+                'rows' => $rows,
+                'linked_academic_year_id' => $linkedAcademicYearId,
+            ]);
+        }
+        catch (\Illuminate\Validation\ValidationException $validationException)
+        {
+            return $this->sendResponse('Validation failed', 422, $validationException->errors());
+        }
+        catch (\Throwable $exception)
+        {
+            Log::error('listAcademicYears failed', [
+                'message' => $exception->getMessage(),
+                'trace' => $exception->getTraceAsString(),
+            ]);
+
+            return $this->sendResponse($exception->getMessage(), 500, []);
+        }
+    }
+
+    /**
+     * Sets academic_year_id on the school row: prefers institutes.id, else users.id when column exists.
+     */
+    protected function linkAcademicYearToSchool(int $academicYearId, int $instituteId, ?int $schoolUserId): void
+    {
+        if (Schema::hasTable('institutes'))
+        {
+            DB::table('institutes')->where('id', $instituteId)->update([
+                'academic_year_id' => $academicYearId,
+            ]);
+
+            return;
+        }
+
+        if ($schoolUserId !== null && Schema::hasColumn('users', 'academic_year_id'))
+        {
+            DB::table('users')->where('id', $schoolUserId)->update([
+                'academic_year_id' => $academicYearId,
+            ]);
+        }
     }
 
     public function login(Request $request)
@@ -167,7 +301,8 @@ class UsersController extends Controller
                     email,
                     user_name,
                     password,
-                    user_type_id
+                    user_type_id,
+                    institute_id
                 FROM
                     users
                 WHERE
@@ -213,7 +348,8 @@ class UsersController extends Controller
                 'name' => $userData->name,
                 'email' => $userData->email,
                 'user_name' => $userData->user_name,
-                'user_type_id' => $userData->user_type_id
+                'user_type_id' => $userData->user_type_id,
+                'institute_id' => $userData->institute_id,
             ];
             return $this->sendResponse('Login successful', 200, $responseData);
         }
@@ -405,136 +541,4 @@ class UsersController extends Controller
         }
     }
 
-    public function getTeachers()
-    {
-        try
-        {
-            $query = "
-                SELECT
-                    id,
-                    name,
-                    email,
-                    user_name,
-                    password
-                FROM
-                    users
-                WHERE
-                    user_type_id = 3
-                    AND status = 'active'
-                ORDER BY
-                    id DESC
-            ";
-            $teachers = DB::select($query);
-            return $this->sendResponse('Teachers fetched successfully', 200, $teachers);
-        }
-        catch (\Throwable $exception)
-        {
-            Log::error('getTeachers failed', [
-                'message' => $exception->getMessage(),
-                'trace' => $exception->getTraceAsString()
-            ]);
-            return $this->sendResponse($exception->getMessage(), 500, []);
-        }
-    }
-
-    public function updateTeacher(Request $request)
-    {
-        try
-        {
-            $requestData = $request->all();
-            $teacherId = $requestData['id'];
-            $name = $requestData['name'];
-            $email = $requestData['email'];
-            $userName = $requestData['userName'];
-            $password = isset($requestData['password']) ? trim($requestData['password']) : '';
-
-            if ($password !== '')
-            {
-                $updateQuery = "
-                    UPDATE
-                        users
-                    SET
-                        name = :name,
-                        email = :email,
-                        user_name = :userName,
-                        password = :password,
-                        updated_at = NOW()
-                    WHERE
-                        id = :teacherId
-                        AND user_type_id = 3
-                ";
-                DB::update($updateQuery, [
-                    'name' => $name,
-                    'email' => $email,
-                    'userName' => $userName,
-                    'password' => Hash::make($password),
-                    'teacherId' => $teacherId
-                ]);
-            }
-            else
-            {
-                $updateQuery = "
-                    UPDATE
-                        users
-                    SET
-                        name = :name,
-                        email = :email,
-                        user_name = :userName,
-                        updated_at = NOW()
-                    WHERE
-                        id = :teacherId
-                        AND user_type_id = 3
-                ";
-                DB::update($updateQuery, [
-                    'name' => $name,
-                    'email' => $email,
-                    'userName' => $userName,
-                    'teacherId' => $teacherId
-                ]);
-            }
-
-            return $this->sendResponse('Teacher updated successfully', 200, []);
-        }
-        catch (\Throwable $exception)
-        {
-            Log::error('updateTeacher failed', [
-                'message' => $exception->getMessage(),
-                'trace' => $exception->getTraceAsString()
-            ]);
-            return $this->sendResponse($exception->getMessage(), 500, []);
-        }
-    }
-
-    public function deleteTeacher(Request $request)
-    {
-        try
-        {
-            $requestData = $request->all();
-            $teacherId = $requestData['id'];
-
-            $updateQuery = "
-                UPDATE
-                    users
-                SET
-                    status = 'deleted',
-                    updated_at = NOW()
-                WHERE
-                    id = :teacherId
-                    AND user_type_id = 3;
-            ";
-            DB::update($updateQuery, [
-                'teacherId' => $teacherId
-            ]);
-
-            return $this->sendResponse('Teacher deleted successfully', 200, []);
-        }
-        catch (\Throwable $exception)
-        {
-            Log::error('deleteTeacher failed', [
-                'message' => $exception->getMessage(),
-                'trace' => $exception->getTraceAsString()
-            ]);
-            return $this->sendResponse($exception->getMessage(), 500, []);
-        }
-    }
 }

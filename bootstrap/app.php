@@ -17,11 +17,16 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->validateCsrfTokens(except: [
             'users/login',
             'users/addUser',
+            'users/addAcademicYear',
+            'users/listAcademicYears',
+            'users/deleteAcademicYear',
             'users/sendOtp',
             'users/verifyOtp',
             'users/resetPassword',
-            'users/updateTeacher',
-            'users/deleteTeacher'
+            'v2users/getMembers',
+            'v2users/updateMember',
+            'v2users/deleteMember',
+            'v2users/addMember',
         ]);
     
     })
