@@ -266,8 +266,12 @@ class UsersController extends Controller
 
     /**
      * Sets academic_year_id on the school row: prefers institutes.id, else users.id when column exists.
+     *
+     * @param int      $academicYearId
+     * @param int      $instituteId
+     * @param int|null $schoolUserId   School user id when updating users.academic_year_id; null if unknown
      */
-    protected function linkAcademicYearToSchool(int $academicYearId, int $instituteId, ?int $schoolUserId): void
+    protected function linkAcademicYearToSchool(int $academicYearId, int $instituteId, $schoolUserId = null): void
     {
         if (Schema::hasTable('institutes'))
         {
@@ -302,7 +306,8 @@ class UsersController extends Controller
                     user_name,
                     password,
                     user_type_id,
-                    institute_id
+                    institute_id,
+                    academic_year_id
                 FROM
                     users
                 WHERE
@@ -350,6 +355,7 @@ class UsersController extends Controller
                 'user_name' => $userData->user_name,
                 'user_type_id' => $userData->user_type_id,
                 'institute_id' => $userData->institute_id,
+                'academic_year_id' => $userData->academic_year_id
             ];
             return $this->sendResponse('Login successful', 200, $responseData);
         }
@@ -369,6 +375,7 @@ class UsersController extends Controller
         {
             $requestData = $request->all();
             $email = $requestData['email'];
+            $purpose = $requestData['purpose'];
 
             // Raw SELECT query
             $query = "
@@ -396,7 +403,7 @@ class UsersController extends Controller
                     add_otp_to_users 
                 WHERE 
                     user_id = :userId
-                    AND otp_expire_at > NOW()
+                    AND expires_at > NOW()
             ";
             $checkOtp = DB::select($checkOtpQuery, ['userId' => $userId]);
             if (!empty($checkOtp))
@@ -407,14 +414,15 @@ class UsersController extends Controller
             $insertQuery = "
                 INSERT INTO 
                     add_otp_to_users 
-                    (user_id, otp, otp_expire_at, created_at, updated_at) 
+                    (user_id, otp_hash, purpose, expires_at, attempts, max_attempts, is_used, created_at, updated_at) 
                 VALUES 
-                (:userId, :otp, DATE_ADD(NOW(), INTERVAL 5 MINUTE), now(), now())
+                (:userId, :otp_hash, :purpose, DATE_ADD(NOW(), INTERVAL 5 MINUTE), 0, 3, 0, now(), now())
             ";
             DB::insert($insertQuery, 
             [
                 'userId' => $userId, 
-                'otp' => $otp
+                'otp_hash' => hash('sha256', $otp),
+                'purpose' => $purpose
             ]);
 
             // Send email (same as before)
@@ -451,29 +459,66 @@ class UsersController extends Controller
         try
         {
             $requestData = $request->all();
+
+            if (empty($requestData['email']) || empty($requestData['otp']))
+            {
+                return $this->sendResponse('Email and OTP are required', 400, []);
+            }
+    
             $email = $requestData['email'];
             $otp = $requestData['otp'];
-
-            $checkOtpQuery = "
-                SELECT 
-                    user_id 
-                FROM 
-                    add_otp_to_users as aotu
-                INNER JOIN 
-                    users as u
-                    ON aotu.user_id = u.id
+            $otpHash = hash('sha256', $otp);
+    
+            $updateQuery = "
+                UPDATE add_otp_to_users 
+                SET 
+                    is_used = 1,
+                    attempts = attempts + 1,
+                    updated_at = NOW()
+                WHERE id = (
+                    SELECT id FROM (
+                        SELECT aotu.id
+                        FROM add_otp_to_users aotu
+                        INNER JOIN users u ON aotu.user_id = u.id
+                        WHERE 
+                            u.email = :email
+                            AND aotu.otp_hash = :otp_hash
+                            AND aotu.expires_at > NOW()
+                            AND aotu.is_used = 0
+                            AND aotu.attempts < aotu.max_attempts
+                        ORDER BY aotu.created_at DESC
+                        LIMIT 1
+                    ) as temp
+                );
+            ";
+    
+            $updated = DB::update($updateQuery, [
+                'email' => $email,
+                'otp_hash' => $otpHash
+            ]);
+    
+            if ($updated > 0)
+            {
+                return $this->sendResponse('OTP verified successfully', 200, []);
+            }
+    
+            $incrementAttemptQuery = "
+                UPDATE add_otp_to_users aotu
+                INNER JOIN users u ON aotu.user_id = u.id
+                SET 
+                    aotu.attempts = aotu.attempts + 1,
+                    aotu.updated_at = NOW()
                 WHERE 
                     u.email = :email
-                    AND aotu.otp = :otp
-                    AND aotu.otp_expire_at > NOW()
+                    AND aotu.is_used = 0
+                    AND aotu.expires_at > NOW()
+                ORDER BY aotu.created_at DESC
+                LIMIT 1
             ";
-            $checkOtp = DB::select($checkOtpQuery, ['email' => $email, 'otp' => $otp]);
-            if (empty($checkOtp))
-            {
-                return $this->sendResponse('Invalid OTP', 400, []);
-            }
-
-            return $this->sendResponse('OTP verified successfully', 200, []);
+    
+            DB::update($incrementAttemptQuery, ['email' => $email]);
+    
+            return $this->sendResponse('Invalid or expired OTP', 400, []);
         }
         catch (\Throwable $exception)
         {
@@ -481,7 +526,8 @@ class UsersController extends Controller
                 'message' => $exception->getMessage(),
                 'trace' => $exception->getTraceAsString()
             ]);
-            return $this->sendResponse($exception->getMessage(), 500, []);
+    
+            return $this->sendResponse('Something went wrong' . $exception->getMessage(), 500, []);
         }
     }
 
