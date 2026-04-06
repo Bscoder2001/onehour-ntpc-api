@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
+use Laravel\Socialite\Facades\Socialite;
 
 class UsersController extends Controller
 {
@@ -464,70 +465,63 @@ class UsersController extends Controller
             {
                 return $this->sendResponse('Email and OTP are required', 400, []);
             }
-    
+
             $email = $requestData['email'];
-            $otp = $requestData['otp'];
-            $otpHash = hash('sha256', $otp);
-    
-            $updateQuery = "
-                UPDATE add_otp_to_users 
-                SET 
-                    is_used = 1,
-                    attempts = attempts + 1,
-                    updated_at = NOW()
-                WHERE id = (
-                    SELECT id FROM (
-                        SELECT aotu.id
-                        FROM add_otp_to_users aotu
-                        INNER JOIN users u ON aotu.user_id = u.id
-                        WHERE 
-                            u.email = :email
-                            AND aotu.otp_hash = :otp_hash
-                            AND aotu.expires_at > NOW()
-                            AND aotu.is_used = 0
-                            AND aotu.attempts < aotu.max_attempts
-                        ORDER BY aotu.created_at DESC
-                        LIMIT 1
-                    ) as temp
-                );
-            ";
-    
-            $updated = DB::update($updateQuery, [
-                'email' => $email,
-                'otp_hash' => $otpHash
-            ]);
-    
-            if ($updated > 0)
-            {
-                return $this->sendResponse('OTP verified successfully', 200, []);
-            }
-    
-            $incrementAttemptQuery = "
-                UPDATE add_otp_to_users aotu
+            $inputOtpHash = trim(hash('sha256', $requestData['otp']));
+            $isUsedQuery = "";
+
+            $checkOtpQuery = "
+                SELECT 
+                    aotu.id,
+                    u.id as user_id,
+                    aotu.otp_hash
+                FROM
+                    add_otp_to_users aotu
                 INNER JOIN users u ON aotu.user_id = u.id
-                SET 
-                    aotu.attempts = aotu.attempts + 1,
-                    aotu.updated_at = NOW()
                 WHERE 
                     u.email = :email
-                    AND aotu.is_used = 0
                     AND aotu.expires_at > NOW()
-                ORDER BY aotu.created_at DESC
-                LIMIT 1
+                    AND aotu.is_used = 0
+                    AND aotu.attempts < aotu.max_attempts;
             ";
-    
-            DB::update($incrementAttemptQuery, ['email' => $email]);
-    
-            return $this->sendResponse('Invalid or expired OTP', 400, []);
+
+            $checkOtp = DB::select($checkOtpQuery, [
+                'email' => $email
+            ]);
+
+            if (!empty($checkOtp))
+            {
+                $dbOtpHash = $checkOtp[0]->otp_hash;
+                $userId = $checkOtp[0]->user_id;
+                $otpId = $checkOtp[0]->id;
+            }
+            else
+            {
+                return $this->sendResponse('Invalid or expired OTP', 400, []);
+            }
+
+            if ($inputOtpHash == $dbOtpHash)
+            {
+                $isUsedQuery = " is_used = 1,";
+                $responseMsg = 'OTP verified successfully';
+            }
+            else $responseMsg = 'Invalid or expired OTP';
+
+            $updateOtpQuery = "
+                UPDATE
+                    add_otp_to_users
+                SET
+                    attempts = attempts + 1,
+                    {$isUsedQuery}
+                    updated_at = NOW()
+                WHERE id = :otpId
+            ";
+            DB::update($updateOtpQuery, ['otpId' => $otpId]);
+            return $this->sendResponse($responseMsg, 200, []);
         }
         catch (\Throwable $exception)
         {
-            Log::error('verifyOtp failed', [
-                'message' => $exception->getMessage(),
-                'trace' => $exception->getTraceAsString()
-            ]);
-    
-            return $this->sendResponse('Something went wrong' . $exception->getMessage(), 500, []);
+            return $this->sendResponse($exception->getMessage(), 500, []);
         }
     }
 
