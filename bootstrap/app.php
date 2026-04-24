@@ -14,6 +14,9 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
 
         $middleware->append(\App\Http\Middleware\CorsMiddleware::class);
+        $middleware->alias([
+            'assessment.auth' => \App\Http\Middleware\AssessmentAuthMiddleware::class,
+        ]);
     
         $middleware->validateCsrfTokens(except: [
             'users/login',
@@ -28,6 +31,17 @@ return Application::configure(basePath: dirname(__DIR__))
             'v2users/updateMember',
             'v2users/deleteMember',
             'v2users/addMember',
+            'questions',
+            'questions/*',
+            'tests',
+            'tests/*',
+            'attempts/*',
+            'results/*',
+            'courses',
+            'courses/*',
+            'subjects',
+            'chapters',
+            'topics',
         ]);
     
     })
