@@ -28,15 +28,43 @@ class TestRepository
 
     public function attachQuestions($testId, $questionIds)
     {
-        $existingCount = (int) DB::table('test_questions')->where('test_id', $testId)->count();
+        $ids = array_values(array_unique(array_map('intval', (array) $questionIds)));
+        $ids = array_filter($ids, function ($qid)
+        {
+            return $qid > 0;
+        });
+
+        if (empty($ids))
+        {
+            return;
+        }
+
+        $existing = DB::table('test_questions')
+            ->where('test_id', $testId)
+            ->pluck('question_id')
+            ->map(function ($q)
+            {
+                return (int) $q;
+            })
+            ->all();
+        $existingSet = array_fill_keys($existing, true);
+        $maxOrder = (int) DB::table('test_questions')->where('test_id', $testId)->max('question_order');
+        $order = $maxOrder;
         $insertRows = [];
 
-        foreach ($questionIds as $index => $questionId)
+        foreach ($ids as $questionId)
         {
+            if (isset($existingSet[$questionId]))
+            {
+                continue;
+            }
+
+            $order++;
+            $existingSet[$questionId] = true;
             $insertRows[] = [
                 'test_id' => $testId,
-                'question_id' => (int) $questionId,
-                'question_order' => $existingCount + $index + 1,
+                'question_id' => $questionId,
+                'question_order' => $order,
                 'created_at' => now(),
                 'updated_at' => now(),
             ];

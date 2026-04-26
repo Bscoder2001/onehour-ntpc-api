@@ -20,10 +20,47 @@ class AttemptRepository
     {
         return DB::table('test_questions as tq')
             ->join('questions as q', 'q.id', '=', 'tq.question_id')
-            ->select('q.id', 'q.topic_id', 'q.question_type', 'q.correct_numeric_answer')
+            ->select('q.id', 'q.topic_id', 'q.question_type', 'q.correct_numeric_answer', 'q.question_text')
             ->where('tq.test_id', $testId)
             ->orderBy('tq.question_order')
             ->get();
+    }
+
+    /**
+     * Questions for a test taker: MCQ with option id/text; numeric has no correct answer in payload.
+     */
+    public function listTestQuestionsForDisplay($testId)
+    {
+        $rows = DB::table('test_questions as tq')
+            ->join('questions as q', 'q.id', '=', 'tq.question_id')
+            ->select(
+                'q.id',
+                'q.question_text',
+                'q.question_type',
+                'tq.question_order',
+                'q.topic_id'
+            )
+            ->where('tq.test_id', $testId)
+            ->orderBy('tq.question_order')
+            ->get();
+
+        foreach ($rows as $row)
+        {
+            if ($row->question_type === 'mcq')
+            {
+                $row->options = DB::table('question_options')
+                    ->where('question_id', $row->id)
+                    ->orderBy('option_order')
+                    ->select('id', 'option_text', 'option_order')
+                    ->get();
+            }
+            else
+            {
+                $row->options = [];
+            }
+        }
+
+        return $rows;
     }
 
     public function upsertAnswer($payload)
@@ -100,9 +137,22 @@ class AttemptRepository
 
     public function listTopicPerformance($attemptId)
     {
-        return DB::table('topic_performance')
-            ->where('attempt_id', $attemptId)
-            ->orderByDesc('accuracy')
+        return DB::table('topic_performance as tp')
+            ->leftJoin('topics as t', 't.id', '=', 'tp.topic_id')
+            ->select(
+                'tp.id',
+                'tp.attempt_id',
+                'tp.user_id',
+                'tp.topic_id',
+                't.name as topic_name',
+                'tp.total_questions',
+                'tp.correct_answers',
+                'tp.accuracy',
+                'tp.created_at',
+                'tp.updated_at'
+            )
+            ->where('tp.attempt_id', $attemptId)
+            ->orderByDesc('tp.accuracy')
             ->get();
     }
 

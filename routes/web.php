@@ -39,6 +39,7 @@ Route::middleware(['assessment.auth'])->group(function ()
     Route::delete('/tests/{id}/questions/{question_id}', [TestsController::class, 'removeQuestion']);
 
     Route::post('/tests/{id}/start', [AttemptsController::class, 'start']);
+    Route::get('/attempts/{id}', [AttemptsController::class, 'show']);
     Route::post('/attempts/{id}/answer', [AttemptsController::class, 'answer']);
     Route::post('/attempts/{id}/submit', [AttemptsController::class, 'submit']);
 
@@ -46,13 +47,17 @@ Route::middleware(['assessment.auth'])->group(function ()
     Route::get('/results/user/{user_id}', [ResultsController::class, 'byUser']);
 
     Route::post('/courses', [CoursesController::class, 'store']);
+    Route::post('/courses/list', [CoursesController::class, 'index']);
     Route::get('/courses', [CoursesController::class, 'index']);
     Route::put('/courses/{id}', [CoursesController::class, 'update']);
     Route::delete('/courses/{id}', [CoursesController::class, 'destroy']);
 
     Route::get('/subjects', [TaxonomyController::class, 'subjects']);
+    Route::post('/subjects', [TaxonomyController::class, 'storeSubject']);
     Route::get('/chapters', [TaxonomyController::class, 'chapters']);
+    Route::post('/chapters', [TaxonomyController::class, 'storeChapter']);
     Route::get('/topics', [TaxonomyController::class, 'topics']);
+    Route::post('/topics', [TaxonomyController::class, 'storeTopic']);
 });
 
 // REMOVE show route (important)

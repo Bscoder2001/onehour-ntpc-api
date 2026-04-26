@@ -15,6 +15,20 @@ class AttemptsController extends Controller
         $this->attemptService = $attemptService;
     }
 
+    public function show(Request $request, $id)
+    {
+        try
+        {
+            $result = $this->attemptService->getAttemptForTaking((int) $id, (int) $request->attributes->get('assessment_user_id'));
+
+            return $this->sendResponse('Attempt loaded successfully', 200, $result);
+        }
+        catch (\RuntimeException $e)
+        {
+            return $this->sendResponse($e->getMessage(), 404, []);
+        }
+    }
+
     public function start(Request $request, $id)
     {
         $result = $this->attemptService->startAttempt($id, (int) $request->attributes->get('assessment_user_id'));

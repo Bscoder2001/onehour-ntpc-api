@@ -6,6 +6,57 @@ use Illuminate\Support\Facades\DB;
 
 class TaxonomyRepository
 {
+    public function createSubject($courseId, $name)
+    {
+        $row = [
+            'course_id' => (int) $courseId,
+            'name' => trim($name),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+
+        return (int) DB::table('subjects')->insertGetId($row);
+    }
+
+    public function createChapter($subjectId, $name)
+    {
+        $row = [
+            'subject_id' => (int) $subjectId,
+            'name' => trim($name),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+
+        return (int) DB::table('chapters')->insertGetId($row);
+    }
+
+    public function createTopic($chapterId, $name)
+    {
+        $row = [
+            'chapter_id' => (int) $chapterId,
+            'name' => trim($name),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+
+        return (int) DB::table('topics')->insertGetId($row);
+    }
+
+    public function findCourse($courseId)
+    {
+        return DB::table('courses')->where('id', (int) $courseId)->first();
+    }
+
+    public function findSubject($subjectId)
+    {
+        return DB::table('subjects')->where('id', (int) $subjectId)->first();
+    }
+
+    public function findChapter($chapterId)
+    {
+        return DB::table('chapters')->where('id', (int) $chapterId)->first();
+    }
+
     public function listSubjectsByCourse($courseId)
     {
         return DB::table('subjects')

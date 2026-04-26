@@ -30,9 +30,16 @@ class QuestionsController extends Controller
         $data['correct_numeric_answer'] = $request->input('correct_numeric_answer');
         $data['options'] = $request->input('options', []);
 
-        $result = $this->questionService->createQuestion($data, (int) $request->attributes->get('assessment_user_id'));
+        try
+        {
+            $result = $this->questionService->createQuestion($data, (int) $request->attributes->get('assessment_user_id'));
 
-        return $this->sendResponse('Question created successfully', 201, $result);
+            return $this->sendResponse('Question created successfully', 201, $result);
+        }
+        catch (\RuntimeException $e)
+        {
+            return $this->sendResponse($e->getMessage(), 422, []);
+        }
     }
 
     public function index(Request $request)
@@ -44,9 +51,16 @@ class QuestionsController extends Controller
 
     public function show($id)
     {
-        $result = $this->questionService->getQuestionById($id);
+        try
+        {
+            $result = $this->questionService->getQuestionById($id);
 
-        return $this->sendResponse('Question fetched successfully', 200, $result);
+            return $this->sendResponse('Question fetched successfully', 200, $result);
+        }
+        catch (\RuntimeException $e)
+        {
+            return $this->sendResponse($e->getMessage(), 404, []);
+        }
     }
 
     public function update(Request $request, $id)
@@ -64,9 +78,16 @@ class QuestionsController extends Controller
         $data['correct_numeric_answer'] = $request->input('correct_numeric_answer');
         $data['options'] = $request->input('options', []);
 
-        $result = $this->questionService->updateQuestion($id, $data, (int) $request->attributes->get('assessment_user_id'));
+        try
+        {
+            $result = $this->questionService->updateQuestion($id, $data, (int) $request->attributes->get('assessment_user_id'));
 
-        return $this->sendResponse('Question updated successfully', 200, $result);
+            return $this->sendResponse('Question updated successfully', 200, $result);
+        }
+        catch (\RuntimeException $e)
+        {
+            return $this->sendResponse($e->getMessage(), 422, []);
+        }
     }
 
     public function destroy($id)

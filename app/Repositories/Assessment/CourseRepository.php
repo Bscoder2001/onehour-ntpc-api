@@ -59,7 +59,7 @@ class CourseRepository
         if (Schema::hasColumn('courses', 'status'))
         {
             return DB::table('courses')->where('id', $id)->update([
-                'status' => 'inactive',
+                'status' => 0,
             ]);
         }
 

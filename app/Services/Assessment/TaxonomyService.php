@@ -47,4 +47,55 @@ class TaxonomyService
 
         return true;
     }
+
+    public function createSubject($courseId, $name)
+    {
+        if (!$this->taxonomyRepository->findCourse($courseId))
+        {
+            throw new \RuntimeException('Course not found');
+        }
+
+        $id = $this->taxonomyRepository->createSubject($courseId, $name);
+        $label = trim($name);
+
+        return [
+            'id' => $id,
+            'name' => $label,
+            'course_id' => (int) $courseId,
+        ];
+    }
+
+    public function createChapter($subjectId, $name)
+    {
+        if (!$this->taxonomyRepository->findSubject($subjectId))
+        {
+            throw new \RuntimeException('Subject not found');
+        }
+
+        $id = $this->taxonomyRepository->createChapter($subjectId, $name);
+        $label = trim($name);
+
+        return [
+            'id' => $id,
+            'name' => $label,
+            'subject_id' => (int) $subjectId,
+        ];
+    }
+
+    public function createTopic($chapterId, $name)
+    {
+        if (!$this->taxonomyRepository->findChapter($chapterId))
+        {
+            throw new \RuntimeException('Chapter not found');
+        }
+
+        $id = $this->taxonomyRepository->createTopic($chapterId, $name);
+        $label = trim($name);
+
+        return [
+            'id' => $id,
+            'name' => $label,
+            'chapter_id' => (int) $chapterId,
+        ];
+    }
 }

@@ -25,12 +25,44 @@ class AttemptService
             'updated_at' => now(),
         ]);
 
-        $questions = $this->attemptRepository->listTestQuestions($testId);
+        $questions = $this->attemptRepository->listTestQuestionsForDisplay($testId);
 
         return [
             'attempt_id' => $attemptId,
             'test_id' => $testId,
             'questions_count' => $questions->count(),
+            'questions' => $questions,
+        ];
+    }
+
+    public function getAttemptForTaking($attemptId, $userId)
+    {
+        $attempt = $this->attemptRepository->findAttemptById($attemptId);
+
+        if (!$attempt)
+        {
+            throw new \RuntimeException('Attempt not found');
+        }
+
+        if ((int) $attempt->user_id !== (int) $userId)
+        {
+            throw new \RuntimeException('Attempt not found');
+        }
+
+        if ($attempt->status === 'submitted')
+        {
+            return [
+                'attempt' => $attempt,
+                'submitted' => true,
+                'questions' => [],
+            ];
+        }
+
+        $questions = $this->attemptRepository->listTestQuestionsForDisplay((int) $attempt->test_id);
+
+        return [
+            'attempt' => $attempt,
+            'submitted' => false,
             'questions' => $questions,
         ];
     }
@@ -71,25 +103,32 @@ class AttemptService
             $testQuestions = $this->attemptRepository->listTestQuestions((int) $attempt->test_id);
             $answers = $this->attemptRepository->listAttemptAnswers($attemptId)->keyBy('question_id');
             $correctOptionMap = $this->attemptRepository->getCorrectOptionMap($testQuestions->pluck('id')->all());
+            $marksPerCorrect = 1.0;
+            $negativePerWrong = 0.25;
 
             $total = $testQuestions->count();
             $correct = 0;
+            $wrong = 0;
             $topicStats = [];
 
             foreach ($testQuestions as $question)
             {
                 $answer = $answers->get($question->id);
                 $isCorrect = false;
+                $answered = false;
 
                 if ($answer)
                 {
                     if ($question->question_type === 'mcq')
                     {
-                        $isCorrect = ((int) (isset($answer->selected_option_id) ? $answer->selected_option_id : 0) === (int) (isset($correctOptionMap[$question->id]) ? $correctOptionMap[$question->id] : 0));
+                        $answered = (isset($answer->selected_option_id) && (int) $answer->selected_option_id > 0);
+                        $isCorrect = $answered
+                            && ((int) $answer->selected_option_id === (int) (isset($correctOptionMap[$question->id]) ? $correctOptionMap[$question->id] : 0));
                     }
                     else
                     {
-                        $isCorrect = trim((string) $answer->numeric_answer) === trim((string) $question->correct_numeric_answer);
+                        $answered = isset($answer->numeric_answer) && trim((string) $answer->numeric_answer) !== '';
+                        $isCorrect = $answered && (trim((string) $answer->numeric_answer) === trim((string) $question->correct_numeric_answer));
                     }
                 }
 
@@ -97,8 +136,12 @@ class AttemptService
                 {
                     $correct++;
                 }
+                elseif ($answered)
+                {
+                    $wrong++;
+                }
 
-                $topicId = (int) $question->topic_id;
+                $topicId = (int) ($question->topic_id ?? 0);
                 if (!isset($topicStats[$topicId]))
                 {
                     $topicStats[$topicId] = ['total' => 0, 'correct' => 0];
@@ -111,8 +154,9 @@ class AttemptService
                 }
             }
 
-            $score = $correct;
-            $accuracy = $total > 0 ? round(($correct / $total) * 100, 2) : 0;
+            $rawScore = ($correct * $marksPerCorrect) - ($wrong * $negativePerWrong);
+            $score = max(0, round($rawScore, 2));
+            $accuracy = $total > 0 ? round(($correct / (float) $total) * 100, 2) : 0;
 
             $this->attemptRepository->updateAttemptSubmission($attemptId, [
                 'status' => 'submitted',

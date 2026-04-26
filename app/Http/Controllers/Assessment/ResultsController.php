@@ -16,9 +16,16 @@ class ResultsController extends Controller
 
     public function show($attempt_id)
     {
-        $result = $this->attemptService->resultByAttempt($attempt_id);
+        try
+        {
+            $result = $this->attemptService->resultByAttempt($attempt_id);
 
-        return $this->sendResponse('Result fetched successfully', 200, $result);
+            return $this->sendResponse('Result fetched successfully', 200, $result);
+        }
+        catch (\RuntimeException $e)
+        {
+            return $this->sendResponse($e->getMessage(), 404, []);
+        }
     }
 
     public function byUser($user_id)
