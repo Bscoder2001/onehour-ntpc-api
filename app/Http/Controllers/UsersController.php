@@ -7,6 +7,8 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use App\Services\ChatTokenService;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Laravel\Socialite\Facades\Socialite;
@@ -349,6 +351,10 @@ class UsersController extends Controller
                 return $this->sendResponse('Invalid username or password', 401, []);
             }
 
+            Auth::loginUsingId((int) $userData->id, $request->boolean('remember'));
+
+            $chatToken = app(ChatTokenService::class)->issue((int) $userData->id);
+
             $responseData = [
                 'user_id' => $userData->id,
                 'name' => $userData->name,
@@ -356,7 +362,8 @@ class UsersController extends Controller
                 'user_name' => $userData->user_name,
                 'user_type_id' => $userData->user_type_id,
                 'institute_id' => $userData->institute_id,
-                'academic_year_id' => $userData->academic_year_id
+                'academic_year_id' => $userData->academic_year_id,
+                'chat_token' => $chatToken,
             ];
             return $this->sendResponse('Login successful', 200, $responseData);
         }

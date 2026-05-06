@@ -9,7 +9,6 @@ use App\Http\Controllers\Assessment\AttemptsController;
 use App\Http\Controllers\Assessment\ResultsController;
 use App\Http\Controllers\Assessment\CoursesController;
 use App\Http\Controllers\Assessment\TaxonomyController;
-
 Route::get('/users/live', [UsersController::class, 'live']);
 Route::post('/users/login', [UsersController::class, 'login']);
 Route::post('/users/addUser', [UsersController::class, 'addUser']);
